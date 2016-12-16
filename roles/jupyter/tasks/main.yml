@@ -1,0 +1,31 @@
+---
+- name: download anaconda
+  get_url: url=https://repo.continuum.io/archive/Anaconda3-{{ anaconda_version }}-Linux-x86_64.sh dest=~/Anaconda3-{{ anaconda_version}}-Linux-x86_64.sh
+
+- name: Check if ~/anaconda directory exists
+  stat: path=~/anaconda
+  register: check_path
+
+- name: install anaconda 
+  command: bash ~/Anaconda3-{{ anaconda_version }}-Linux-x86_64.sh -b -p ~/anaconda
+  environment:
+     PATH: "~/anaconda/bin:{{ ansible_env.PATH }}"
+  when: check_path.stat.exists == false
+
+- name: Adding the path in the bashrc files
+  lineinfile: dest=~/.bashrc line='export PATH=~/anaconda/bin:$PATH' insertafter='EOF' regexp='export PATH=~/anaconda/bin:$PATH' state=present
+
+- name: Source the bashrc file
+  shell: . ~/.bashrc
+
+- name: create jupyter directory
+  file: path=~/.jupyter state=directory mode=0755
+
+- name: create jupyter notebooks directory
+  file: path=~/notebooks state=directory mode=0755
+
+- name: create jupyter configuration file
+  template: src=jupyter_notebook_config.py dest=~/.jupyter/jupyter_notebook_config.py
+
+- name: create self-signed SSL cert
+  command: openssl req -new -nodes -x509 -subj "/C=US/ST=Wisconsin/L=Mequon/O=IT/CN=jupyter" -days 3650 -keyout ~/mykey.key -out ~/mycert.pem -extensions v3_ca creates=~/mycert.pem

@@ -1,0 +1,88 @@
+---  
+- hosts: localhost  
+  connection: local  
+  gather_facts: no    
+  vars:  
+    #your region  
+    region: us-west-1
+    keyname: tgkey1
+    #your ip address
+    allowed_ip: 0.0.0.0/0
+    instance_type: c4.xlarge     
+    image: ami-6e165d0e
+    name_tag: jupyter-1
+  tasks:  
+    - name: create key pair  
+      tags: keypair  
+      ec2_key:  
+        region: "{{ region }}"  
+        name: "{{ keyname }}"      
+      register: mykey  
+
+    - name: write the private key to file
+      copy: content="{{ mykey.key.private_key }}" dest="~/.ssh/{{ keyname }}.pem" mode=0600
+      when: mykey.changed
+
+    - name: create security group  
+      tags: sg
+      ec2_group:    
+        region: "{{ region }}"
+        #your security group name  
+        name: sg_jupyter    
+        description: security group for webserver host
+        rules:
+          # allow ssh access from your ip address  
+          - proto: tcp  
+            from_port: 22  
+            to_port: 22  
+            cidr_ip: "{{ allowed_ip }}"   
+          # allow 8888 access from anywhere  
+          - proto: tcp  
+            from_port: 8888    
+            to_port: 8888    
+            cidr_ip: 0.0.0.0/0
+        rules_egress:  
+          - proto: all  
+            cidr_ip: 0.0.0.0/0    
+
+    - name: launch ec2 instance  
+      tags: ec2
+      local_action:  
+        module: ec2  
+        region: "{{ region }}"  
+        key_name: "{{ keyname }}"
+        instance_type: "{{ instance_type }}"    
+        image: "{{ image }}"  
+        wait: yes    
+        group: sg_jupyter  
+        instance_tags:  
+          Name: "{{name_tag}}"  
+          class: jupyter
+        count_tag:
+          Name: "{{name_tag}}"
+        exact_count: 1
+      register: ec2    
+
+    - name: associate new EIP for the instance  
+      tags: eip      
+      local_action:
+        module: ec2_eip
+        region: "{{ region }}"
+        instance_id: "{{ item.id }}"
+      with_items: ec2.instances   
+      when: item.id is defined   
+      register: eip
+
+
+    - name: Add Route53 DNS record for this instance (overwrite if needed)
+      route53:
+         command: create
+         zone: ice-ix.net
+         record: "{{name_tag}}.ice-ix.net"
+         type: A
+         ttl: 3600
+         value: "{{ eip.public_ip }}"
+         overwrite: yes
+      when: eip.public_ip is defined   
+
+
